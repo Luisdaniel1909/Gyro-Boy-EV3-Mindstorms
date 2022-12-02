@@ -76,7 +76,7 @@ ACCIONES_MAP_COLOR = {
 # while not nuestracondicion:
 #         yield
 #
-# También usamos el rendimiento para actualizar la velocidad de conducción y los valores de dirección en la pantalla principal.
+# También usamos yield para actualizar la velocidad de conducción y los valores de dirección en la pantalla principal.
 # control loop:
 #
 #     yield action
