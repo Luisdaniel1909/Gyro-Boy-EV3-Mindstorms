@@ -172,11 +172,11 @@ while True:
     derech_motor.reset_angle(0)
     temporizador_de_caida.reset()
 
-    motor_position_sum = 0
+    suma_de_posición_del_motor = 0
     angulo_de_rueda = 0
-    motor_position_change = [0, 0, 0, 0]
+    cambio_de_posición_del_motor = [0, 0, 0, 0]
     drive_speed, steering = 0, 0
-    control_loop_count = 0
+    conteo_de_bucle_de_control = 0
     robot_body_angle = -0.25
 
     # Dado que update_action() es un generador (usa "yield" en lugar de
@@ -214,35 +214,35 @@ while True:
 
         # Esto calcula el periodo medio del bucle de control. Esto se utiliza en el cálculo de la retroalimentación de control
         # en lugar del tiempo de bucle único para filtrar las fluctuaciones aleatorias.
-        if control_loop_count == 0:
+        if conteo_de_bucle_de_control == 0:
             # La primera vez que se pasa por el bucle, tenemos que asignar un valor para evitar dividir por cero después.
             average_control_loop_period = PERIODO_DE_BUCLE_OBJETIVO / 1000
             temporizador_de_bucle_de_control.reset()
         else:
             average_control_loop_period = (temporizador_de_bucle_de_control.time() / 1000 /
-                                           control_loop_count)
-        control_loop_count += 1
+                                           conteo_de_bucle_de_control)
+        conteo_de_bucle_de_control += 1
 
         # calcular el ángulo del cuerpo del robot y la velocidad
         girosco_sensor_value = girosco_sensor.speed()
         gyro_offset *= (1 - FACTOR_DE_DESPLAZAMIENTO_DEL_GIROSCOPIO)
         gyro_offset += FACTOR_DE_DESPLAZAMIENTO_DEL_GIROSCOPIO * girosco_sensor_value
-        robot_body_rate = girosco_sensor_value - gyro_offset
-        robot_body_angle += robot_body_rate * average_control_loop_period
+        angulo_del_cuerpo_del_robot = girosco_sensor_value - gyro_offset
+        robot_body_angle += angulo_del_cuerpo_del_robot * average_control_loop_period
 
         # calcular el ángulo de la rueda y la velocidad
         izqu_motor_angle = izqu_motor.angle()
         derech_motor_angle = derech_motor.angle()
-        previous_motor_sum = motor_position_sum
-        motor_position_sum = izqu_motor_angle + derech_motor_angle
-        change = motor_position_sum - previous_motor_sum
-        motor_position_change.insert(0, change)
-        del motor_position_change[-1]
-        angulo_de_rueda += change - drive_speed * average_control_loop_period
-        velocidad_rueda = sum(motor_position_change) / 4 / average_control_loop_period
+        suma_del_motor_anterior = suma_de_posición_del_motor
+        suma_de_posición_del_motor = izqu_motor_angle + derech_motor_angle
+        cambio = suma_de_posición_del_motor - suma_del_motor_anterior
+        cambio_de_posición_del_motor.insert(0, cambio)
+        del cambio_de_posición_del_motor[-1]
+        angulo_de_rueda += cambio - drive_speed * average_control_loop_period
+        velocidad_rueda = sum(cambio_de_posición_del_motor) / 4 / average_control_loop_period
 
         # Este es el principal cálculo de retroalimentación de control.
-        output_power = (-0.01 * drive_speed) + (0.8 * robot_body_rate +
+        output_power = (-0.01 * drive_speed) + (0.8 * angulo_del_cuerpo_del_robot +
                                                 15 * robot_body_angle +
                                                 0.08 * velocidad_rueda +
                                                 0.12 * angulo_de_rueda)
