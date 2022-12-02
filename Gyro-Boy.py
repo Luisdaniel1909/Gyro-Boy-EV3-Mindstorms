@@ -8,47 +8,42 @@ from pybricks.ev3devices import Motor, UltrasonicSensor, ColorSensor, GyroSensor
 from pybricks.parameters import Port, Color, ImageFile, SoundFile
 from pybricks.tools import wait, StopWatch
 
-# Initialize the EV3 brick.
+# Este comando inicia el ladrillo EV3.
 ev3 = EV3Brick()
 
-# Initialize the motors connected to the drive wheels.
+# Inicializar los motores conectados a las ruedas motrices.
 left_motor = Motor(Port.D)
 right_motor = Motor(Port.A)
 
-# Initialize the motor connected to the arms.
+# Inicializar el motor conectado a los brazos.
 arm_motor = Motor(Port.C)
 
-# Initialize the Color Sensor. It is used to detect the colors that command
-# which way the robot should move.
+# Inicializar el sensor de color. Se utiliza para detectar los colores que ordena el camino que debe seguir el robot.
 color_sensor = ColorSensor(Port.S1)
 
-# Initialize the gyro sensor. It is used to provide feedback for balancing the
-# robot.
+# Inicializar el sensor giroscópico. Se utiliza para proporcionar información para equilibrar el robot y que este no se caiga.
 gyro_sensor = GyroSensor(Port.S2)
 
-# Initialize the ultrasonic sensor. It is used to detect when the robot gets
-# too close to an obstruction.
+# Inicializar el sensor ultrasónico. Se utiliza para detectar cuando el robot se acerca demasiado cerca de un obstáculo.
 ultrasonic_sensor = UltrasonicSensor(Port.S4)
 
-# Initialize the timers.
+# Inicializar los temporizadores.
 fall_timer = StopWatch()
 single_loop_timer = StopWatch()
 control_loop_timer = StopWatch()
 action_timer = StopWatch()
 
 
-# The following (UPPERCASE names) are constants that control how the program
-# behaves.
-
+# Los siguientes elementos (palabras en MAYÚSCULAS) son constantes que controlan cómo se comporta el programa.
 GYRO_CALIBRATION_LOOP_COUNT = 200
 GYRO_OFFSET_FACTOR = 0.0005
 TARGET_LOOP_PERIOD = 15  # ms
 ARM_MOTOR_SPEED = 600  # deg/s
 
-# Actions will be used to change which way the robot drives.
+# Las acciones se utilizarán para cambiar la forma en que conduce el robot.
 Action = namedtuple('Action ', ['drive_speed', 'steering'])
 
-# These are the pre-defined actions
+# Estas son las acciones predefinidas
 STOP = Action(drive_speed=0, steering=0)
 FORWARD_FAST = Action(drive_speed=150, steering=0)
 FORWARD_SLOW = Action(drive_speed=40, steering=0)
@@ -57,8 +52,7 @@ BACKWARD_SLOW = Action(drive_speed=-10, steering=0)
 TURN_RIGHT = Action(drive_speed=0, steering=70)
 TURN_LEFT = Action(drive_speed=0, steering=-70)
 
-# The colors that the color sensor can detect are mapped to actions that the
-# robot can perform.
+# Los colores que el sensor de color puede detectar se asignan a acciones que el robot puede realizar.
 ACTION_MAP = {
     Color.RED: STOP,
     Color.GREEN: FORWARD_FAST,
@@ -68,17 +62,15 @@ ACTION_MAP = {
 }
 
 
-# This function monitors the color sensor and ultrasonic sensor.
+# Esta siguiente función monitorea el sensor de color y el sensor ultrasónico.
+
+# Es importante que no se realicen llamadas de bloqueo en esta función, de lo contrario afectará el tiempo de ciclo de 
+#control en el programa principal. En cambio, cedemos al bucle de control mientras esperamos que suceda algo como esto:
 #
-# It is important that no blocking calls are made in this function, otherwise
-# it will affect the control loop time in the main program. Instead, we yield
-# to the control loop while we are waiting for a certain thing to happen like
-# this:
-#
-#     while not condition:
+# while not nuestracondicion:
 #         yield
 #
-# We also use yield to update the drive speed and steering values in the main
+# También usamos el rendimiento para actualizar la velocidad de conducción y los valores de dirección en la pantalla principal.
 # control loop:
 #
 #     yield action
@@ -87,7 +79,7 @@ def update_action():
     arm_motor.reset_angle(0)
     action_timer.reset()
 
-    # Drive forward for 4 seconds to leave stand, then stop.
+    # Conduzca hacia adelante durante 4 segundos para dejar el soporte, luego deténgase.
     yield FORWARD_SLOW
     while action_timer.time() < 4000:
         yield
@@ -95,15 +87,12 @@ def update_action():
     action = STOP
     yield action
 
-    # Start checking sensors on arms. When specific conditions are sensed,
-    # different actions will be performed.
+# Comience a verificar los sensores en los brazos. Cuando se detectan condiciones específicas, se realizarán diferentes acciones.
     while True:
-        # First, we check the color sensor. The detected color is looked up in
-        # the action map.
+        # Primero, revisamos el sensor de color. El color detectado se busca en el mapa de acción.
         new_action = ACTION_MAP.get(color_sensor.color())
 
-        # If the color was found, beep for 0.1 seconds and then change the
-        # action depending on which color was detected.
+# Si se encontró el color, emitir un pitido durante 0,1 segundos y luego cambiar la acción según el color detectado.
         if new_action is not None:
             action_timer.reset()
             ev3.speaker.beep(1000, -1)
@@ -111,8 +100,8 @@ def update_action():
                 yield
             ev3.speaker.beep(0, -1)
 
-            # If the new action involves steering, combine the new steering
-            # with the old drive speed. Otherwise, use the entire new action.
+           # Si la nueva acción involucra la dirección, combine la nueva dirección con la velocidad de conducción anterior. 
+           # De lo contrario, utilice toda la nueva acción.
             if new_action.steering != 0:
                 action = Action(drive_speed=action.drive_speed,
                                 steering=new_action.steering)
@@ -120,10 +109,9 @@ def update_action():
                 action = new_action
             yield action
 
-        # If the measured distance of the ultrasonic sensor is less than 250
-        # millimeters, then back up slowly.
-        if ultrasonic_sensor.distance() < 250:
-            # Back up slowly while wiggling the arms back and forth.
+        # Si la distancia medida del sensor ultrasónico es inferior a 250 milímetros, retroceda lentamente.
+        if ultrasonic_sensor.distance() < 250: 
+           # Retroceda lentamente mientras mueve los brazos de un lado a otro.
             yield BACKWARD_SLOW
 
             arm_motor.run_angle(ARM_MOTOR_SPEED, 30, wait=False)
@@ -136,8 +124,7 @@ def update_action():
             while not arm_motor.control.done():
                 yield
 
-            # Randomly turn left or right for 4 seconds while still backing
-            # up slowly.
+            # Gire aleatoriamente a la izquierda o a la derecha durante 4 segundos mientras sigue retrocediendo lentamente.
             turn = urandom.choice([TURN_LEFT, TURN_RIGHT])
             yield Action(drive_speed=BACKWARD_SLOW.drive_speed,
                          steering=turn.steering)
@@ -145,8 +132,7 @@ def update_action():
             while action_timer.time() < 4000:
                 yield
 
-            # Beep and then restore the previous action from before the
-            # ultrasonic sensor detected an obstruction.
+           # Sonido de Beep y luego restablezca la acción anterior antes de que el sensor ultrasónico detecte una obstrucción.
             action_timer.reset()
             ev3.speaker.beep(1000, -1)
             while action_timer.time() < 100:
@@ -155,27 +141,27 @@ def update_action():
 
             yield action
 
-        # This adds a small delay since we don't need to read these sensors
-        # continuously. Reading once every 100 milliseconds is fast enough.
+       # Esto agrega un pequeño retraso ya que no necesitamos leer estos sensores continuamente. 
+       # Leer una vez cada 100 milisegundos es lo suficientemente rápido para evitar sobrecarga.
         action_timer.reset()
         while action_timer.time() < 100:
             yield
 
 
-# If we fall over in the middle of an action, the arm motors could be moving or
-# the speaker could be beeping, so we need to stop both of those.
+# Si el robot se cae en medio de una acción, los motores de los brazos podrían estar moviéndose 
+# o el altavoz podría estar emitiendo un pitido, por lo que debemos detener ambos.
 def stop_action():
     ev3.speaker.beep(0, -1)
     arm_motor.run_target(ARM_MOTOR_SPEED, 0)
 
 
 while True:
-    # Sleeping eyes and light off let us know that the robot is waiting for
-    # any movement to stop before the program can continue.
+    # Los ojos durmientes y la luz apagada nos permiten saber que el robot 
+    # está esperando que se detenga cualquier movimiento antes de que el programa pueda continuar (caracteristica estetica).
     ev3.screen.load_image(ImageFile.SLEEPING)
     ev3.light.off()
 
-    # Reset the sensors and variables.
+    # Restablecer los sensores y variables a cero.
     left_motor.reset_angle(0)
     right_motor.reset_angle(0)
     fall_timer.reset()
@@ -187,15 +173,13 @@ while True:
     control_loop_count = 0
     robot_body_angle = -0.25
 
-    # Since update_action() is a generator (it uses "yield" instead of
-    # "return") this doesn't actually run update_action() right now but
-    # rather prepares it for use later.
+    # Dado que update_action() es un generador (usa "yield" en lugar de
+    # "return") en realidad no ejecuta  update_action() en este momento, sino que lo prepara para su uso posterior.
     action_task = update_action()
 
-    # Calibrate the gyro offset. This makes sure that the robot is perfectly
-    # still by making sure that the measured rate does not fluctuate more than
-    # 2 deg/s. Gyro drift can cause the rate to be non-zero even when the robot
-    # is not moving, so we save that value for use later.
+# Calibre la compensación del giroscopio. Esto asegura que el robot esté perfectamente inmóvil asegurándose de 
+# que la velocidad medida no fluctúe más de 2 grados/s. La desviación del giroscopio puede hacer que la tasa sea 
+# distinta de cero incluso cuando el robot no se está moviendo, por lo que guardamos ese valor para usarlo más adelante.
     while True:
         gyro_minimum_rate, gyro_maximum_rate = 440, -440
         gyro_sum = 0
@@ -211,24 +195,21 @@ while True:
             break
     gyro_offset = gyro_sum / GYRO_CALIBRATION_LOOP_COUNT
 
-    # Awake eyes and green light let us know that the robot is ready to go!
+   # Los ojos despiertos y la luz verde nos hacen saber que el robot está listo para funcionar (caracteristica estetica)
     ev3.speaker.play_file(SoundFile.SPEED_UP)
     ev3.screen.load_image(ImageFile.AWAKE)
     ev3.light.on(Color.GREEN)
 
-    # Main control loop for balancing the robot.
+    # Bucle de control principal para equilibrar el robot.
     while True:
-        # This timer measures how long a single loop takes. This will be used
-        # to help keep the loop time consistent, even when different actions
-        # are happening.
+# Este temporizador mide cuánto tiempo tarda un solo bucle. Esto se usará para ayudar a mantener el tiempo de bucle constante, 
+# incluso cuando se estén realizando diferentes acciones.
         single_loop_timer.reset()
 
-        # This calculates the average control loop period. This is used in the
-        # control feedback calculation instead of the single loop time to
-        # filter out random fluctuations.
+        # Esto calcula el periodo medio del bucle de control. Esto se utiliza en el cálculo de la retroalimentación de control
+        # en lugar del tiempo de bucle único para filtrar las fluctuaciones aleatorias.
         if control_loop_count == 0:
-            # The first time through the loop, we need to assign a value to
-            # avoid dividing by zero later.
+            # La primera vez que se pasa por el bucle, tenemos que asignar un valor para evitar dividir por cero después.
             average_control_loop_period = TARGET_LOOP_PERIOD / 1000
             control_loop_timer.reset()
         else:
@@ -236,14 +217,14 @@ while True:
                                            control_loop_count)
         control_loop_count += 1
 
-        # calculate robot body angle and speed
+        # calcular el ángulo del cuerpo del robot y la velocidad
         gyro_sensor_value = gyro_sensor.speed()
         gyro_offset *= (1 - GYRO_OFFSET_FACTOR)
         gyro_offset += GYRO_OFFSET_FACTOR * gyro_sensor_value
         robot_body_rate = gyro_sensor_value - gyro_offset
         robot_body_angle += robot_body_rate * average_control_loop_period
 
-        # calculate wheel angle and speed
+        # calcular el ángulo de la rueda y la velocidad
         left_motor_angle = left_motor.angle()
         right_motor_angle = right_motor.angle()
         previous_motor_sum = motor_position_sum
@@ -254,7 +235,7 @@ while True:
         wheel_angle += change - drive_speed * average_control_loop_period
         wheel_rate = sum(motor_position_change) / 4 / average_control_loop_period
 
-        # This is the main control feedback calculation.
+        # Este es el principal cálculo de retroalimentación de control.
         output_power = (-0.01 * drive_speed) + (0.8 * robot_body_rate +
                                                 15 * robot_body_angle +
                                                 0.08 * wheel_rate +
@@ -264,40 +245,37 @@ while True:
         if output_power < -100:
             output_power = -100
 
-        # Drive the motors.
+        # Acciona los motores.
         left_motor.dc(output_power - 0.1 * steering)
         right_motor.dc(output_power + 0.1 * steering)
 
-        # Check if robot fell down. If the output speed is +/-100% for more
-        # than one second, we know that we are no longer balancing properly.
+        # Comprueba si el robot se ha caído. Si la velocidad de salida es +/-100% 
+        # durante más más de un segundo, sabemos que ya no estamos equilibrados correctamente.
         if abs(output_power) < 100:
             fall_timer.reset()
         elif fall_timer.time() > 1000:
             break
 
-        # This runs update_action() until the next "yield" statement.
+        # Esto ejecuta update_action() hasta la siguiente sentencia "yield".
         action = next(action_task)
         if action is not None:
             drive_speed, steering = action
 
-        # Make sure loop time is at least TARGET_LOOP_PERIOD. The output power
-        # calculation above depends on having a certain amount of time in each
-        # loop.
+        # Asegúrese de que el tiempo de bucle es al menos 
+        # TARGET_LOOP_PERIOD. El cálculo de la potencia de salida anterior depende de tener una cierta cantidad de tiempo en cada bucle.
         wait(TARGET_LOOP_PERIOD - single_loop_timer.time())
 
-    # Handle falling over. If we get to this point in the program, it means
-    # that the robot fell over.
+    # Manejar la caída. Si llegamos a este punto del programa, significa que el robot se ha caído.
 
-    # Stop all of the motors.
+    # Parar todos los motores.
     stop_action()
     left_motor.stop()
     right_motor.stop()
 
-    # Knocked out eyes and red light let us know that the robot lost its
-    # balance.
+    # Los ojos desorbitados y la luz roja nos hacen saber que el robot perdió el equilibrio (carateristica estetica).
     ev3.light.on(Color.RED)
     ev3.screen.load_image(ImageFile.KNOCKED_OUT)
     ev3.speaker.play_file(SoundFile.SPEED_DOWN)
 
-    # Wait for a few seconds before trying to balance again.
+    # Espera unos segundos antes de intentar equilibrar de nuevo.
     wait(3000)
