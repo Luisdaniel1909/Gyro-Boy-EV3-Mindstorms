@@ -1,287 +1,463 @@
 #!/usr/bin/env pybricks-micropython
 
-# Este módulo "namedtuple" implementa tipos de datos de contenedores especializados que brindan 
-# alternativas a los contenedores incorporados de propósito general de Python
-from ucollections import namedtuple
-
 # La biblioteca urandom nos permite generar números aleatorios, o pseudoaleatorios. 
 # Permite el acceso al ruido ambiental recogido de dispositivos y otras fuentes
 import urandom
 
+
 #importar modulos de proposito general
 from pybricks.hubs import EV3Brick
-from pybricks.ev3devices import Motor, UltrasonicSensor, ColorSensor, GyroSensor
-from pybricks.parameters import Port, Color, ImageFile, SoundFile
+from pybricks.ev3devices import Motor, ColorSensor, TouchSensor
+from pybricks.parameters import Port, Button, Color, Direction
+from pybricks.media.ev3dev import Image, ImageFile, SoundFile
 from pybricks.tools import wait, StopWatch
 
-# Este comando inicia el ladrillo EV3.
-ev3 = EV3Brick()
 
-# Inicializar los motores conectados a las ruedas motrices.
-izqu_motor = Motor(Port.D)
-derech_motor = Motor(Port.A)
+class Puppy:
+    # Estas constantes se utilizan para posicionar las piernas.
+    ANGULO_MEDIO_SUPERIOR = 25
+    ANGULO_DE_PIE = 65
+    ANGULO_DE_ESTIRAMIENTO = 125
 
-# Inicializar el motor conectado a los brazos.
-brazo_motor = Motor(Port.C)
+    # Estas constantes son para posicionar la cabeza.
+    ANGULO_DE_CABEZA_ARRIBA = 0
+    ANGULO_CABEZA_ABAJO = 0
 
-# Inicializar el sensor de color. Se utiliza para detectar los colores que ordena el camino que debe seguir el robot.
-color_sensor = ColorSensor(Port.S1)
+    # Estas constantes son para los ojos.
+    OJOS_NEUTRALES = Image(ImageFile.NEUTRAL)
+    OJOS_CANSADOS = Image(ImageFile.TIRED_MIDDLE)
+    OJO_IZQUIERDO_CANSADO = Image(ImageFile.TIRED_LEFT)
+    OJO_DERECHO_CANSADO = Image(ImageFile.TIRED_RIGHT)
+    OJOS_DURMIENDO = Image(ImageFile.SLEEPING)
+    OJOS_HERIDOS = Image(ImageFile.HURT)
+    OJOS_ENOJADOS = Image(ImageFile.ANGRY)
+    OJOS_CORAZON = Image(ImageFile.LOVE)
+    OJOS_BIZCOS = Image(ImageFile.TEAR)  # la lágrima se borra después
 
-# Inicializar el sensor giroscópico. Se utiliza para proporcionar información para equilibrar el robot y que este no se caiga.
-girosco_sensor = GyroSensor(Port.S2)
+    def __init__(self):
+        # Inicializar el ladrillo EV3.
+        self.ev3 = EV3Brick()
 
-# Inicializar el sensor ultrasónico. Se utiliza para detectar cuando el robot se acerca demasiado cerca de un obstáculo.
-ultrasonic_sensor = UltrasonicSensor(Port.S4)
+        # Inicializar los motores conectados a las patas traseras.
+        self.left_leg_motor = Motor(Port.D, Direction.COUNTERCLOCKWISE)
+        self.right_leg_motor = Motor(Port.A, Direction.COUNTERCLOCKWISE)
 
-# Inicializar los temporizadores.
-temporizador_de_caida = StopWatch()
-temporizador_bucle_unico = StopWatch()
-temporizador_de_bucle_de_control = StopWatch()
-temporizador_de_accion = StopWatch()
+        #Inicializar el motor conectado al cabezal.
+        #El tornillo sin fin mueve 1 diente por rotación. 
+        #Está conectado a un engranaje de 24 dientes. 
+        #El engranaje de 24 dientes está conectado a engranajes paralelos 
+        #de 12 dientes a través de un eje. Los engranajes de 12 dientes se conectan 
+        #con engranajes de 36 dientes.
+        self.head_motor = Motor(Port.C, Direction.COUNTERCLOCKWISE,
+                                gears=[[1, 24], [12, 36]])
 
+        #Inicialice el Sensor de Color. 
+        #Se utiliza para detectar los colores al alimentar al cachorro.
+        self.color_sensor = ColorSensor(Port.S4)
 
-# Los siguientes elementos (palabras en MAYÚSCULAS) son constantes que controlan cómo se comporta el programa.
-CONTEO_BUCLE_DE_CALIBRACION_DEL_GIROSCOPIO = 200
-FACTOR_DE_DESPLAZAMIENTO_DEL_GIROSCOPIO = 0.0005
-PERIODO_DE_BUCLE_OBJETIVO = 15  # milisegundos
-VELOCIDAD_DEL_MOTOR_DEL_BRAZO = 600  # angulo de grados
+        #Inicializa el sensor táctil. Se utiliza para detectar cuando alguien acaricia al cachorro.
+        self.touch_sensor = TouchSensor(Port.S1)
 
-# Las acciones se utilizarán para cambiar la forma en que conduce el robot.
-Action = namedtuple('Action ', ['drive_speed', 'steering'])
+        self.acaricia_count_timer = StopWatch()
+        self.alimentar_count_timer = StopWatch()
+        self.count_changed_timer = StopWatch()
 
-# Estas son las acciones predefinidas
-DETENER = Action(drive_speed=0, steering=0)
-ADELANTE_RAPIDO = Action(drive_speed=150, steering=0)
-ADELANTE_LENTO = Action(drive_speed=40, steering=0)
-HACIA_ATRAS_RAPIDO = Action(drive_speed=-75, steering=0)
-HACIA_ATRAS_LENTO = Action(drive_speed=-10, steering=0)
-GIRAR_A_LA_DERECHA = Action(drive_speed=0, steering=70)
-GIRAR_A_LA_IZQUI = Action(drive_speed=0, steering=-70)
+        # Estos atributos se inicializan más tarde en el método reset().
+        self.acaricia_target = None
+        self.alimentar_target = None
+        self.acaricia_count = None
+        self.alimentar_count = None
 
-# Los colores que el sensor de color puede detectar se asignan a acciones que el robot puede realizar.
-ACCIONES_MAP_COLOR = {
-    Color.RED: DETENER,
-    Color.GREEN: ADELANTE_RAPIDO,
-    Color.BLUE: GIRAR_A_LA_DERECHA,
-    Color.YELLOW: GIRAR_A_LA_IZQUI,
-    Color.WHITE: HACIA_ATRAS_RAPIDO,
-}
+        # Estos atributos son utilizados por las propiedades.
+        self._behavior = None
+        self._behavior_changed = None
+        self._eyes = None
+        self._eyes_changed = None
 
+        # Estos atributos se utilizan en la actualización de los ojos
+        self.eyes_timer_1 = StopWatch()
+        self.eyes_timer_1_end = 0
+        self.eyes_timer_2 = StopWatch()
+        self.eyes_timer_2_end = 0
+        self.eyes_closed = False
 
-# Esta siguiente función monitorea el sensor de color y el sensor ultrasónico.
+        # Estos atributos son utilizados por el comportamiento lúdico.
+        self.playful_timer = StopWatch()
+        self.playful_bark_interval = None
 
-# Es importante que no se realicen llamadas de bloqueo en esta función, de lo contrario afectará el tiempo de ciclo de 
-#control en el programa principal. En cambio, cedemos al bucle de control mientras esperamos que suceda algo como esto:
-#
-# while not nuestracondicion:
-#         yield
-#
-# También usamos yield para actualizar la velocidad de conducción y los valores de dirección en la pantalla principal.
-# control loop:
-#
-#     yield action
-#
-def update_action():
-    brazo_motor.reset_angle(0)
-    temporizador_de_accion.reset()
+        # Estos atributos se utilizan en los métodos de actualización.
+        self.prev_petted = None
+        self.prev_color = None
 
-    # Conduzca hacia adelante durante 4 segundos para dejar el soporte que sostiene el robot, luego deténgase.
-    yield ADELANTE_LENTO
-    while temporizador_de_accion.time() < 4000:
-        yield
+    def adjust_head(self):
+        """Utiliza los botones arriba y abajo del ladrillo EV3 para ajustar la 
+        cabeza del cachorro hacia arriba o hacia abajo.
+        """
+        self.ev3.screen.load_image(ImageFile.EV3_ICON)
+        self.ev3.light.on(Color.ORANGE)
 
-    action = DETENER
-    yield action
-
-# Comience a verificar los sensores en los brazos. Cuando se detectan condiciones específicas, se realizarán diferentes acciones.
-    while True:
-        # Primero, revisamos el sensor de color. El color detectado se busca en el mapa de acción.
-        nueva_accion = ACCIONES_MAP_COLOR.get(color_sensor.color())
-
-# Si se encontró el color, emitir un pitido durante 0,1 segundos y luego cambiar la acción según el color detectado.
-        if nueva_accion is not None:
-            temporizador_de_accion.reset()
-            ev3.speaker.beep(1000, -1)
-            while temporizador_de_accion.time() < 100:
-                yield
-            ev3.speaker.beep(0, -1)
-
-           # Si la nueva acción involucra la dirección, combine la nueva dirección con la velocidad de conducción anterior. 
-           # De lo contrario, utilice toda la nueva acción.
-            if nueva_accion.steering != 0:
-                action = Action(drive_speed=action.drive_speed,
-                                steering=nueva_accion.steering)
+        while True:
+            buttons = self.ev3.buttons.pressed()
+            if Button.CENTER in buttons:
+                break
+            elif Button.UP in buttons:
+                self.head_motor.run(20)
+            elif Button.DOWN in buttons:
+                self.head_motor.run(-20)
             else:
-                action = nueva_accion
-            yield action
+                self.head_motor.stop()
+            wait(100)
 
-        # Si la distancia medida del sensor ultrasónico es inferior a 250 milímetros, retroceda lentamente.
-        if ultrasonic_sensor.distance() < 250: 
-           # Retroceda lentamente mientras mueve los brazos de un lado a otro.
-            yield HACIA_ATRAS_LENTO
+        self.head_motor.stop()
+        self.head_motor.reset_angle(0)
+        self.ev3.light.on(Color.GREEN)
 
-            brazo_motor.run_angle(VELOCIDAD_DEL_MOTOR_DEL_BRAZO, 30, wait=False)
-            while not brazo_motor.control.done():
-                yield
-            brazo_motor.run_angle(VELOCIDAD_DEL_MOTOR_DEL_BRAZO, -60, wait=False)
-            while not brazo_motor.control.done():
-                yield
-            brazo_motor.run_angle(VELOCIDAD_DEL_MOTOR_DEL_BRAZO, 30, wait=False)
-            while not brazo_motor.control.done():
-                yield
+    def move_head(self, target):
+        """Mueve la cabeza al ángulo objetivo.
 
-            # Gire aleatoriamente a la izquierda o a la derecha durante 4 segundos mientras sigue retrocediendo lentamente.
-            girar = urandom.choice([GIRAR_A_LA_IZQUI, GIRAR_A_LA_DERECHA])
-            yield Action(drive_speed=HACIA_ATRAS_LENTO.drive_speed,
-                         steering=girar.steering)
-            temporizador_de_accion.reset()
-            while temporizador_de_accion.time() < 4000:
-                yield
+        Argumentos:
+            target (int):
+                El ángulo objetivo en grados. 0 es la posición inicial,
+                valores negativos están por debajo de este punto y valores positivos
+                están por encima de este punto.
+        """
+        self.head_motor.run_target(20, target)
 
-           # Sonido de Beep y luego restablezca la acción anterior antes de que el sensor ultrasónico detecte una obstrucción.
-            temporizador_de_accion.reset()
-            ev3.speaker.beep(1000, -1)
-            while temporizador_de_accion.time() < 100:
-                yield
-            ev3.speaker.beep(0, -1)
+    def reset(self):
+        # debe ser llamado cuando el cachorro está sentado.
+        self.left_leg_motor.reset_angle(0)
+        self.right_leg_motor.reset_angle(0)
+        # Elige un número aleatorio de tiempo para acariciar al cachorro.
+        self.acaricia_target = urandom.randint(3, 6)
+        # Elige un número aleatorio de tiempo para alimentar al cachorro.
+        self.alimentar_target = urandom.randint(2, 4)
+        # El recuento de caricias y el recuento de alimentos comienzan en 1
+        self.acaricia_count, self.alimentar_count = 1, 1
+        # Reinicia los temporizadores.
+        self.acaricia_count_timer.reset()
+        self.alimentar_count_timer.reset()
+        self.count_changed_timer.reset()
+        # Establece el comportamiento inicial.
+        self.behavior = self.idle
 
-            yield action
+    # Los siguientes 8 métodos definen los 8 comportamientos del cachorro.
 
-       # Esto agrega un pequeño retraso ya que no necesitamos leer estos sensores continuamente. 
-       # Leer una vez cada 100 milisegundos es lo suficientemente rápido para evitar sobrecarga.
-        temporizador_de_accion.reset()
-        while temporizador_de_accion.time() < 100:
-            yield
+    def idle(self):
+        """El cachorro esta ocioso y esperando a que alguien lo acaricie o le dé de comer""".
+        if self.did_behavior_change:
+            print('idle')
+            self.stand_up()
+        self.update_eyes()
+        self.update_behavior()
+        self.update_acaricia_count()
+        self.update_alimentar_count()
+
+    def go_to_sleep(self):
+        """Hace que el cachorro se duerma."""
+        if self.did_behavior_change:
+            print('go_to_sleep')
+            self.eyes = self.OJOS_CANSADOS
+            self.sit_down()
+            self.move_head(self.ANGULO_CABEZA_ABAJO)
+            self.eyes = self.OJOS_DURMIENDO
+            self.ev3.speaker.play_file(SoundFile.SNORING)
+        if self.touch_sensor.pressed() and Button.CENTER in self.ev3.buttons.pressed():
+            self.count_changed_timer.reset()
+            self.behavior = self.wake_up
+
+    def wake_up(self):
+        """Hace que el cachorro se despierte."""
+        if self.did_behavior_change:
+            print('wake_up')
+        self.eyes = self.OJOS_CANSADOS
+        self.ev3.speaker.play_file(SoundFile.DOG_WHINE)
+        self.move_head(self.ANGULO_DE_CABEZA_ARRIBA)
+        self.sit_down()
+        self.stretch()
+        wait(1000)
+        self.stand_up()
+        self.behavior = self.idle
+
+    def act_playful(self):
+        """Hace que el cachorro actue de forma juguetona."""
+        if self.did_behavior_change:
+            print('act_playful')
+            self.eyes = self.OJOS_NEUTRALES
+            self.stand_up()
+            self.playful_bark_interval = 0
+
+        if self.update_acaricia_count():
+            # Si el cachorro fue acariciado, entonces hemos terminado de ser juguetones
+            self.behavior = self.idle
+
+        if self.playful_timer.time() > self.playful_bark_interval:
+            self.ev3.speaker.play_file(SoundFile.DOG_BARK_2)
+            self.playful_timer.reset()
+            self.playful_bark_interval = urandom.randint(4, 8) * 1000
+
+    def act_angry(self):
+        """Hace que el cachorro se enfade."""
+        if self.did_behavior_change:
+            print('act_angry')
+        self.eyes = self.OJOS_ENOJADOS
+        self.ev3.speaker.play_file(SoundFile.DOG_GROWL)
+        self.stand_up()
+        wait(1500)
+        self.ev3.speaker.play_file(SoundFile.DOG_BARK_1)
+        self.acaricia_count -= 1
+        print('acaricia_count:', self.acaricia_count, 'acaricia_target:', self.acaricia_target)
+        self.behavior = self.idle
+
+    def act_hungry(self):
+        if self.did_behavior_change:
+            print('act_hungry')
+            self.eyes = self.OJOS_HERIDOS
+            self.sit_down()
+            self.ev3.speaker.play_file(SoundFile.DOG_WHINE)
+
+        if self.update_alimentar_count():
+            # Si tenemos comida, entonces ya no tenemos hambre.
+            self.behavior = self.idle
+
+        if self.update_acaricia_count():
+            # Si nos dan una mascota en vez de comida, entonces nos enfadamos.
+            self.behavior = self.act_angry
+
+    def go_to_bathroom(self):
+        if self.did_behavior_change:
+            print('go_to_bathroom')
+        self.eyes = self.OJOS_BIZCOS
+        self.stand_up()
+        wait(100)
+        self.right_leg_motor.run_target(100, self.ANGULO_DE_ESTIRAMIENTO)
+        wait(800)
+        self.ev3.speaker.play_file(SoundFile.HORN_1)
+        wait(1000)
+        for _ in range(3):
+            self.right_leg_motor.run_angle(100, 20)
+            self.right_leg_motor.run_angle(100, -20)
+        self.right_leg_motor.run_target(100, self.ANGULO_DE_PIE)
+        self.alimentar_count = 1
+        self.behavior = self.idle
+
+    def act_happy(self):
+        if self.did_behavior_change:
+            print('act_happy')
+        self.eyes = self.OJOS_CORAZON
+        # self.move_head(self.?)
+        self.sit_down()
+        for _ in range(3):
+            self.ev3.speaker.play_file(SoundFile.DOG_BARK_1)
+            self.hop()
+        wait(500)
+        self.sit_down()
+        self.reset()
+
+    def sit_down(self):
+        """Hace que el cachorro se siente."""
+        self.left_leg_motor.run(-50)
+        self.right_leg_motor.run(-50)
+        wait(1000)
+        self.left_leg_motor.stop()
+        self.right_leg_motor.stop()
+        wait(100)
+
+    # Los siguientes 4 métodos definen acciones que se utilizan para hacer algunas partes de
+    # los comportamientos anteriores.
+
+    def stand_up(self):
+        """Hace que el cachorro se ponga de pie."""
+        self.left_leg_motor.run_target(100, self.ANGULO_MEDIO_SUPERIOR, wait=False)
+        self.right_leg_motor.run_target(100, self.ANGULO_MEDIO_SUPERIOR)
+        while not self.left_leg_motor.control.done():
+            wait(100)
+
+        self.left_leg_motor.run_target(50, self.ANGULO_DE_PIE, wait=False)
+        self.right_leg_motor.run_target(50, self.ANGULO_DE_PIE)
+        while not self.left_leg_motor.control.done():
+            wait(100)
+
+        wait(500)
+
+    def stretch(self):
+        """Hace que el cachorro estire las patas hacia atrás."""
+        self.stand_up()
+
+        self.left_leg_motor.run_target(100, self.ANGULO_DE_ESTIRAMIENTO, wait=False)
+        self.right_leg_motor.run_target(100, self.ANGULO_DE_ESTIRAMIENTO)
+        while not self.left_leg_motor.control.done():
+            wait(100)
+
+        self.ev3.speaker.play_file(SoundFile.DOG_WHINE)
+
+        self.left_leg_motor.run_target(100, self.ANGULO_DE_PIE, wait=False)
+        self.right_leg_motor.run_target(100, self.ANGULO_DE_PIE)
+        while not self.left_leg_motor.control.done():
+            wait(100)
+
+    def hop(self):
+        """Hace que el cachorro salte."""
+        self.left_leg_motor.run(500)
+        self.right_leg_motor.run(500)
+        wait(275)
+        self.left_leg_motor.hold()
+        self.right_leg_motor.hold()
+        wait(275)
+        self.left_leg_motor.run(-50)
+        self.right_leg_motor.run(-50)
+        wait(275)
+        self.left_leg_motor.stop()
+        self.right_leg_motor.stop()
+
+    @property
+    def behavior(self):
+        """Obtiene y establece el comportamiento actual."""
+        return self._behavior
+
+    @behavior.setter
+    def behavior(self, value):
+        if self._behavior != value:
+            self._behavior = value
+            self._behavior_changed = True
+
+    @property
+    def did_behavior_change(self):
+        """bool: Prueba si el comportamiento cambió desde la última vez que esta
+        propiedad fue leída.
+        """
+        if self._behavior_changed:
+            self._behavior_changed = False
+            return True
+        return False
+
+    def update_behavior(self):
+        """Actualiza la propiedad :prop:`behavior` basándose en el estado actual
+        de acariciar y alimentar.
+        """
+        if self.acaricia_count == self.acaricia_target and self.alimentar_count == self.alimentar_target:
+            # Si tenemos la cantidad exacta de caricias y alimentos, actuar feliz.
+            self.behavior = self.act_happy
+        elif self.acaricia_count > self.acaricia_target and self.alimentar_count < self.alimentar_target:
+            # Si tenemos demasiadas caricias y poca comida, actúa con rabia.
+            self.behavior = self.act_angry
+        elif self.acaricia_count < self.acaricia_target and self.alimentar_count > self.alimentar_target:
+            # Si no tenemos suficientes caricias y demasiada comida, vamos al baño.
+            self.behavior = self.go_to_bathroom
+        elif self.acaricia_count == 0 and self.alimentar_count > 0:
+            # Si no tenemos caricias y algo de comida, actúa juguetón.
+            self.behavior = self.act_playful
+        elif self.alimentar_count == 0:
+            # Si no tenemos comida, actúa con hambre.
+            self.behavior = self.act_hungry
+
+    @property
+    def eyes(self):
+        """Consigue y fija la mirada""".
+        return self._eyes
+
+    @eyes.setter
+    def eyes(self, value):
+        if value != self._eyes:
+            self._eyes = value
+            self.ev3.screen.load_image(value)
+
+    def update_eyes(self):
+        if self.eyes_timer_1.time() > self.eyes_timer_1_end:
+            self.eyes_timer_1.reset()
+            if self.eyes == self.OJOS_DURMIENDO:
+                self.eyes_timer_1_end = urandom.randint(1, 5) * 1000
+                self.eyes = self.OJO_DERECHO_CANSADO
+            else:
+                self.eyes_timer_1_end = 250
+                self.eyes = self.OJOS_DURMIENDO
+
+        if self.eyes_timer_2.time() > self.eyes_timer_2_end:
+            self.eyes_timer_2.reset()
+            if self.eyes != self.OJOS_DURMIENDO:
+                self.eyes_timer_2_end = urandom.randint(1, 10) * 1000
+                if self.eyes != self.OJO_IZQUIERDO_CANSADO:
+                    self.eyes = self.OJO_IZQUIERDO_CANSADO
+                else:
+                    self.eyes = self.OJO_DERECHO_CANSADO
+
+    def update_acaricia_count(self):
+        """Actualiza el atributo :attr:`acaricia_count` si el cachorro está siendo
+        acariciado (sensor táctil pulsado).
+
+        Devuelve:
+            bool:
+                ``True`` si el cachorro fue acariciado desde la última vez que este método fue llamado.
+                 en caso contrario ``False``.
+        """
+        changed = False
+
+        petted = self.touch_sensor.pressed()
+        if petted and petted != self.prev_petted:
+            self.acaricia_count += 1
+            print('acaricia_count:', self.acaricia_count, 'acaricia_target:', self.acaricia_target)
+            self.count_changed_timer.reset()
+            if not self.behavior == self.act_hungry:
+                self.eyes = self.OJOS_BIZCOS
+                self.ev3.speaker.play_file(SoundFile.DOG_SNIFF)
+            changed = True
+
+        self.prev_petted = petted
+        return changed
+
+    def update_alimentar_count(self):
+        """Actualiza el atributo :attr:`alimentar_count` si el cachorro está siendo
+        alimentado (el sensor de color detecta un color).
+
+        Devuelve:
+            bool:
+                ``True`` si el cachorro fue alimentado desde la última vez que este método fue llamado.
+                 de lo contrario ``False``.
+        """
+        color = self.color_sensor.color()
+        changed = False
+
+        if color is not None and color != Color.BLACK and color != self.prev_color:
+            self.alimentar_count += 1
+            print('alimentar_count:', self.alimentar_count, 'alimentar_target:', self.alimentar_target)
+            changed = True
+            self.count_changed_timer.reset()
+            self.prev_color = color
+            self.eyes = self.OJOS_BIZCOS
+            self.ev3.speaker.play_file(SoundFile.CRUNCHING)
+
+        return changed
+
+    def monitor_counts(self):
+        """Supervisa los recuentos de caricias y alimentos y los reduce con el tiempo"""
+        if self.acaricia_count_timer.time() > 15000:
+            self.acaricia_count_timer.reset()
+            self.acaricia_count = max(0, self.acaricia_count - 1)
+            print('acaricia_count:', self.acaricia_count, 'acaricia_target:', self.acaricia_target)
+        if self.alimentar_count_timer.time() > 15000:
+            self.alimentar_count_timer.reset()
+            self.alimentar_count = max(0, self.alimentar_count - 1)
+            print('alimentar_count:', self.alimentar_count, 'alimentar_target:', self.alimentar_target)
+        if self.count_changed_timer.time() > 30000:
+            # Si no ha pasado nada durante 30 segundos, ir a dormir
+            self.count_changed_timer.reset()
+            self.behavior = self.go_to_sleep
+
+    def run(self):
+        """Este es el bucle de ejecución del programa principal."""
+        self.sit_down()
+        self.adjust_head()
+        self.eyes = self.OJOS_DURMIENDO
+        self.reset()
+        while True:
+            self.monitor_counts()
+            self.behavior()
+            wait(100)
 
 
-# Si el robot se cae en medio de una acción, los motores de los brazos podrían estar moviéndose 
-# o el altavoz podría estar emitiendo un pitido, por lo que debemos detener ambos.
-def stop_action():
-    ev3.speaker.beep(0, -1)
-    brazo_motor.run_target(VELOCIDAD_DEL_MOTOR_DEL_BRAZO, 0)
+# Esto cubre la lágrima para hacer una nueva imagen.
+Puppy.OJOS_BIZCOS.draw_box(120, 60, 140, 85, fill=True, color=Color.WHITE)
 
 
-while True:
-    # Los ojos durmientes y la luz apagada nos permiten saber que el robot 
-    # está esperando que se detenga cualquier movimiento antes de que el programa pueda continuar (caracteristica estetica).
-    ev3.screen.load_image(ImageFile.SLEEPING)
-    ev3.light.off()
-
-    # Restablecer los sensores y variables a cero.
-    izqu_motor.reset_angle(0)
-    derech_motor.reset_angle(0)
-    temporizador_de_caida.reset()
-
-    suma_de_posición_del_motor = 0
-    angulo_de_rueda = 0
-    cambio_de_posición_del_motor = [0, 0, 0, 0]
-    drive_speed, steering = 0, 0
-    conteo_de_bucle_de_control = 0
-    robot_body_angle = -0.25
-
-    # Dado que update_action() es un generador (usa "yield" en lugar de
-    # "return") en realidad no ejecuta  update_action() en este momento, sino que lo prepara para su uso posterior.
-    action_task = update_action()
-
-# Calibre la compensación del giroscopio. Esto asegura que el robot esté perfectamente inmóvil asegurándose de 
-# que la velocidad medida no fluctúe más de 2 grados/s. La desviación del giroscopio puede hacer que la tasa sea 
-# distinta de cero incluso cuando el robot no se está moviendo, por lo que guardamos ese valor para usarlo más adelante.
-    while True:
-        gyro_minimum_rate, gyro_maximum_rate = 440, -440
-        gyro_sum = 0
-        for _ in range(CONTEO_BUCLE_DE_CALIBRACION_DEL_GIROSCOPIO):
-            girosco_sensor_value = girosco_sensor.speed()
-            gyro_sum += girosco_sensor_value
-            if girosco_sensor_value > gyro_maximum_rate:
-                gyro_maximum_rate = girosco_sensor_value
-            if girosco_sensor_value < gyro_minimum_rate:
-                gyro_minimum_rate = girosco_sensor_value
-            wait(5)
-        if gyro_maximum_rate - gyro_minimum_rate < 2:
-            break
-    gyro_offset = gyro_sum / CONTEO_BUCLE_DE_CALIBRACION_DEL_GIROSCOPIO
-
-   # Los ojos despiertos y la luz verde nos hacen saber que el robot está listo para funcionar (caracteristica estetica)
-    ev3.speaker.play_file(SoundFile.SPEED_UP)
-    ev3.screen.load_image(ImageFile.AWAKE)
-    ev3.light.on(Color.GREEN)
-
-    # Bucle de control principal para equilibrar el robot.
-    while True:
-# Este temporizador mide cuánto tiempo tarda un solo bucle. Esto se usará para ayudar a mantener el tiempo de bucle constante, 
-# incluso cuando se estén realizando diferentes acciones.
-        temporizador_bucle_unico.reset()
-
-        # Esto calcula el periodo medio del bucle de control. Esto se utiliza en el cálculo de la retroalimentación de control
-        # en lugar del tiempo de bucle único para filtrar las fluctuaciones aleatorias.
-        if conteo_de_bucle_de_control == 0:
-            # La primera vez que se pasa por el bucle, tenemos que asignar un valor para evitar dividir por cero después.
-            average_control_loop_period = PERIODO_DE_BUCLE_OBJETIVO / 1000
-            temporizador_de_bucle_de_control.reset()
-        else:
-            average_control_loop_period = (temporizador_de_bucle_de_control.time() / 1000 /
-                                           conteo_de_bucle_de_control)
-        conteo_de_bucle_de_control += 1
-
-        # calcular el ángulo del cuerpo del robot y la velocidad
-        girosco_sensor_value = girosco_sensor.speed()
-        gyro_offset *= (1 - FACTOR_DE_DESPLAZAMIENTO_DEL_GIROSCOPIO)
-        gyro_offset += FACTOR_DE_DESPLAZAMIENTO_DEL_GIROSCOPIO * girosco_sensor_value
-        angulo_del_cuerpo_del_robot = girosco_sensor_value - gyro_offset
-        robot_body_angle += angulo_del_cuerpo_del_robot * average_control_loop_period
-
-        # calcular el ángulo de la rueda y la velocidad
-        izqu_motor_angle = izqu_motor.angle()
-        derech_motor_angle = derech_motor.angle()
-        suma_del_motor_anterior = suma_de_posición_del_motor
-        suma_de_posición_del_motor = izqu_motor_angle + derech_motor_angle
-        cambio = suma_de_posición_del_motor - suma_del_motor_anterior
-        cambio_de_posición_del_motor.insert(0, cambio)
-        del cambio_de_posición_del_motor[-1]
-        angulo_de_rueda += cambio - drive_speed * average_control_loop_period
-        velocidad_rueda = sum(cambio_de_posición_del_motor) / 4 / average_control_loop_period
-
-        # Este es el principal cálculo de retroalimentación de control.
-        output_power = (-0.01 * drive_speed) + (0.8 * angulo_del_cuerpo_del_robot +
-                                                15 * robot_body_angle +
-                                                0.08 * velocidad_rueda +
-                                                0.12 * angulo_de_rueda)
-        if output_power > 100:
-            output_power = 100
-        if output_power < -100:
-            output_power = -100
-
-        # Acciona los motores.
-        izqu_motor.dc(output_power - 0.1 * steering)
-        derech_motor.dc(output_power + 0.1 * steering)
-
-        # Comprueba si el robot se ha caído. Si la velocidad de salida es +/-100% 
-        # durante más más de un segundo, sabemos que ya no estamos equilibrados correctamente.
-        if abs(output_power) < 100:
-            temporizador_de_caida.reset()
-        elif temporizador_de_caida.time() > 1000:
-            break
-
-        # Esto ejecuta update_action() hasta la siguiente sentencia "yield".
-        action = next(action_task)
-        if action is not None:
-            drive_speed, steering = action
-
-        # Asegúrese de que el tiempo de bucle es al menos 
-        # PERIODO_DE_BUCLE_OBJETIVO. El cálculo de la potencia de salida anterior depende de tener una cierta cantidad de tiempo en cada bucle.
-        wait(PERIODO_DE_BUCLE_OBJETIVO - temporizador_bucle_unico.time())
-
-    # Manejar la caída. Si llegamos a este punto del programa, significa que el robot se ha caído.
-
-    # Parar todos los motores.
-    stop_action()
-    izqu_motor.stop()
-    derech_motor.stop()
-
-    # Los ojos desorbitados y la luz roja nos hacen saber que el robot perdió el equilibrio (carateristica estetica).
-    ev3.light.on(Color.RED)
-    ev3.screen.load_image(ImageFile.KNOCKED_OUT)
-    ev3.speaker.play_file(SoundFile.SPEED_DOWN)
-
-    # Espera unos segundos antes de intentar equilibrar de nuevo.
-    wait(3000)
+if __name__ == '__main__':
+    puppy = Puppy()
+    puppy.run()
